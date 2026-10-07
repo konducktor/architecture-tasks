@@ -16,7 +16,7 @@ enum { NOT_ARRIVED, QUEUED, INSIDE, DONE };
 enum { IDLE, PREPARE, OPEN_IN, LOADING, CLOSE_IN, LEVELING, OPEN_OUT, UNLOADING, CLOSE_OUT };
 
 typedef struct {
-    int id, size, dir; // dir: 0 – вперёд (участок 0 -> N), 1 - назад
+    int id, size, dir; // dir: 0 = вперёд (участок 0 -> N), 1 = назад
     int prio, arrive; // приоритет и время прибытия
     int state, pos, ch; // участок канала и камера, к которой судно стоит в очереди
     int queued_at;
@@ -27,7 +27,7 @@ typedef struct {
     int dir; // сторона входа текущей группы
     int water; // сторона, с уровнем которой совпадает вода в камере
     int load; // занятая вместимость
-    int gate[2]; // 1 - ворота открыты
+    int gate[2]; // 1 = ворота открыты
     int last_dir;
 } Chamber;
 
