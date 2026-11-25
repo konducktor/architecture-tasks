@@ -11,18 +11,26 @@ make -s -C .. || exit 1
 
 no_leftovers() {
     sleep 0.5
-    ! pgrep -f "$bin/(server|chamber|gate|ship)" > /dev/null
+    ! pgrep -f "$bin/(server|chamber|gate|ship|monitor)" > /dev/null
 }
 
-# итог одного теста: имя, ожидаемая строка в логе сервера
+# монитор видел то же, что и сервер: инварианты в его журнале и одинаковая итоговая статистика
+monitor_agrees() {
+    monitor_log="$logs/$1_monitor.log"
+    ./check_monitor_log.sh "$monitor_log" &&
+        [ "$(tail -n 1 "$monitor_log")" = "$(tail -n 1 "$logs/$1.log")" ]
+}
+
+# итог одного теста: имя, ожидаемая строка в логе сервера и в журнале монитора
 verdict() {
     name="$1"; expected="$2"
 
-    if grep -Eq "$expected" "$logs/$name.log" && ./check_log.sh "$logs/$name.log" && no_leftovers; then
+    if grep -Eq "$expected" "$logs/$name.log" && ./check_log.sh "$logs/$name.log" &&
+        grep -Eq "$expected" "$logs/${name}_monitor.log" && monitor_agrees "$name" && no_leftovers; then
         echo "OK   $name"
     else
         echo "FAIL $name"
-        pkill -f "$bin/(server|chamber|gate|ship)"
+        pkill -f "$bin/(server|chamber|gate|ship|monitor)"
     fi
     tail -n 1 "$logs/$name.log"
 }
@@ -121,4 +129,24 @@ if ! $bin/server 300.1.1.1 "$port" 2> /dev/null && ! $bin/server 203.0.113.7 "$p
     echo "OK   $name"
 else
     echo "FAIL $name"
+fi
+
+# мониторы подключаются посреди работы: получают снимок состояния; отключение монитора не влияет на модель
+name="late_monitors"
+start_in_background unlimited.txt "$name" 1.5
+$bin/monitor 127.0.0.1 "$port" "$logs/${name}_late.log" > /dev/null &
+late_monitor=$!
+$bin/monitor 127.0.0.1 "$port" "$logs/${name}_killed.log" > /dev/null &
+killed_monitor=$!
+sleep 1; kill -9 $killed_monitor
+sleep 0.5; kill -INT "$(pgrep -f "$bin/server")"
+wait $job; wait $late_monitor
+verdict "$name" "Прервано пользователем"
+if grep -q "состояние системы на момент подключения" "$logs/${name}_late.log" &&
+    grep -q "Прервано пользователем" "$logs/${name}_late.log" &&
+    [ "$(tail -n 1 "$logs/${name}_late.log")" = "$(tail -n 1 "$logs/$name.log")" ] &&
+    grep -q "монитор: соединение разорвано" "$logs/$name.log"; then
+    echo "OK   $name: снимок, итог и отключение монитора"
+else
+    echo "FAIL $name: снимок, итог и отключение монитора"
 fi

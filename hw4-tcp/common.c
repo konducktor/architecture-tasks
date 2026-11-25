@@ -195,3 +195,15 @@ const char *stop_reason(int reason) {
     default: return "неизвестная причина";
     }
 }
+
+const char *violation_text(int code) {
+    switch (code) {
+    case VIOLATION_ENTER_UNSAFE: return "судно входит при несовпадающем уровне или закрытых воротах";
+    case VIOLATION_CAPACITY: return "вместимость камеры превышена";
+    case VIOLATION_EXIT_UNSAFE: return "судно выходит при несовпадающем уровне или закрытых воротах";
+    case VIOLATION_LEVEL_WITH_OPEN_GATES: return "уровень воды меняется при открытых воротах";
+    case VIOLATION_GATE_OPEN_UNSAFE: return "ворота открываются при открытых противоположных или несовпадающем уровне";
+    case VIOLATION_OPPOSITE_GATES_OPEN: return "противоположные ворота открыты одновременно";
+    default: return "неизвестное нарушение";
+    }
+}

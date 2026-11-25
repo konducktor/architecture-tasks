@@ -84,9 +84,9 @@ int is_last_section(const Ship *ship) {
 }
 
 // нарушение инварианта модели; в нормальной работе не должно появляться
-void violation(const char *what) {
+void violation(int code) {
     world.violations++;
-    event("НАРУШЕНИЕ ИНВАРИАНТА: %s", what);
+    event("НАРУШЕНИЕ ИНВАРИАНТА: %s", violation_text(code));
 }
 
 // читает до 12 чисел параметров из файла; недостающие остаются значениями по умолчанию

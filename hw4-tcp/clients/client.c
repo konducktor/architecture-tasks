@@ -9,6 +9,7 @@
 static int server_sock = -1;
 static int tick_ms = 1;
 static char client_name[64] = "клиент";
+static void (*stop_handler)(int reason);
 
 // модельное время: последнее время от сервера плюс прошедшее с тех пор локально
 static int synced_time;
@@ -29,6 +30,10 @@ void client_set_name(const char *format, ...) {
     va_start(args, format);
     vsnprintf(client_name, sizeof(client_name), format, args);
     va_end(args);
+}
+
+void client_on_stop(void (*handler)(int reason)) {
+    stop_handler = handler;
 }
 
 void client_say(const char *format, ...) {
@@ -80,7 +85,8 @@ Msg client_receive(void) {
     sync_time(msg.time);
 
     if (msg.type == M_STOP) {
-        client_say("модель остановлена: %s", stop_reason(msg.a));
+        if (stop_handler) stop_handler(msg.a);
+        else client_say("модель остановлена: %s", stop_reason(msg.a));
         close(server_sock);
         exit(0);
     }

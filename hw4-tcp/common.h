@@ -5,8 +5,23 @@
 
 #include <stdint.h>
 
+#define MAX_CHAMBERS 100
+#define MAX_SHIPS 1000
+
 // роли клиентов в сообщении M_HELLO
-enum { ROLE_CHAMBER, ROLE_GATE, ROLE_SHIP };
+enum { ROLE_CHAMBER, ROLE_GATE, ROLE_SHIP, ROLE_MONITOR };
+
+enum {
+    SHIP_CONNECTING, // подключилось, но ещё не сообщило о прибытии
+    SHIP_QUEUED,
+    SHIP_ENTERING, // диспетчер позвал судно в камеру
+    SHIP_INSIDE,
+    SHIP_EXITING,
+    SHIP_PASSED,
+    SHIP_LEFT // ушло из системы, не пройдя её (отключилось или отклонено)
+};
+
+enum { GATE_CLOSED, GATE_OPENING, GATE_IS_OPEN, GATE_CLOSING };
 
 // стороны камеры и ворот: 0 – верхние (у участка с номером камеры), 1 – нижние
 enum { SIDE_UPPER, SIDE_LOWER };
@@ -43,7 +58,56 @@ enum {
     M_FREE, // камера -> сервер: цикл закончен, камера свободна
 
     // остановка
-    M_STOP // сервер -> клиент: модель остановлена, a = причина остановки (ALL_DONE, TIME_OUT, ...)
+    M_STOP, // сервер -> клиент: модель остановлена, a = причина остановки (ALL_DONE, TIME_OUT, ...)
+
+    // сервер -> монитор: параметры и снимок состояния при подключении
+    M_INFO, // a = INFO_*, b = значение
+    M_SNAPSHOT_BEGIN, // дальше идут события, описывающие текущее состояние (монитор их не печатает)
+    M_SNAPSHOT_END,
+    M_COUNTS, // a = прошли систему, b = покинули её, c = сколько судов подключалось
+
+    // сервер -> монитор: события модели
+    M_EV_CHAMBER_CONNECTED, // a = камера
+    M_EV_GATE_CONNECTED, // a = камера, b = сторона
+    M_EV_LOCKING_STARTED,
+    M_EV_CLIENT_REJECTED, // a = причина (REJECT_*)
+    M_EV_SHIP_CONNECTED, // a = судно
+    M_EV_SHIP_PRIORITY, // a = судно; приходит перед M_EV_SHIP_ARRIVED приоритетного судна
+    M_EV_SHIP_ARRIVED, // a = судно, b = размер, c = направление
+    M_EV_SHIP_STATE, // только в снимке: a = судно, b = SHIP_*, c = участок
+    M_EV_SHIP_QUEUED, // a = судно, b = камера, c = участок
+    M_EV_GROUP_STARTED, // a = камера, b = сторона входа
+    M_EV_LEVEL_BEGIN, // a = камера, b = сторона, под которую меняется вода
+    M_EV_LEVEL_END, // a = камера, b = сторона
+    M_EV_GATE_STATE, // a = камера, b = сторона, c = GATE_CLOSED .. GATE_CLOSING
+    M_EV_SHIP_CALLED, // a = судно, b = камера, c = MOVE_ENTER или MOVE_EXIT
+    M_EV_SHIP_ENTERED, // a = судно, b = камера
+    M_EV_SHIP_EXITED, // a = судно, b = камера, c = участок
+    M_EV_SHIP_PASSED, // a = судно
+    M_EV_SHIP_LEFT, // a = судно, b = причина (LEFT_*)
+    M_EV_SHIP_LOST, // a = судно: связь потеряна, судно остаётся в модели до выгрузки
+    M_EV_CHAMBER_FREE, // a = камера
+    M_EV_PARTICIPANT_LOST, // a = роль, b = камера, c = сторона (для ворот)
+    M_EV_VIOLATION, // a = VIOLATION_*
+    M_EV_TIME_LIMIT, // a = момент остановки по времени (0 – без ограничения)
+    M_EV_FINAL_COUNTS, // a = прошли, b = покинули, c = групп
+    M_EV_FINAL_TIMES, // a = время завершения, b = среднее ожидание, c = максимальное
+    M_EV_FINAL_OTHER // a = смен уровня, b = нарушений инвариантов, c = сигнал остановки
+};
+
+// параметры модели, которые монитор получает в M_INFO
+enum { INFO_CHAMBERS, INFO_CAPACITY, INFO_STEP, INFO_SHIPS_EXPECTED, INFO_TIME_LIMIT, INFO_STRATEGY, INFO_MAX_WAIT };
+
+// почему судно покинуло систему, не пройдя её
+enum { LEFT_DISCONNECTED, LEFT_UNLOADED_WITHOUT_LINK, LEFT_REJECTED };
+
+enum {
+    VIOLATION_ENTER_UNSAFE,
+    VIOLATION_CAPACITY,
+    VIOLATION_EXIT_UNSAFE,
+    VIOLATION_LEVEL_WITH_OPEN_GATES,
+    VIOLATION_GATE_OPEN_UNSAFE,
+    VIOLATION_OPPOSITE_GATES_OPEN
 };
 
 // причины отказа в подключении
@@ -87,5 +151,6 @@ const char *dir_name(int dir);
 const char *side_name(int side);
 const char *reject_reason(int reason);
 const char *stop_reason(int reason);
+const char *violation_text(int code);
 
 #endif

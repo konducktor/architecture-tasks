@@ -3,20 +3,7 @@
 #ifndef MODEL_H
 #define MODEL_H
 
-#define MAX_CHAMBERS 100
-#define MAX_SHIPS 1000
-
-enum {
-    SHIP_CONNECTING, // подключилось, но ещё не сообщило о прибытии
-    SHIP_QUEUED,
-    SHIP_ENTERING, // диспетчер позвал судно в камеру
-    SHIP_INSIDE,
-    SHIP_EXITING,
-    SHIP_PASSED,
-    SHIP_LEFT // ушло из системы, не пройдя её (отключилось или отклонено)
-};
-
-enum { GATE_CLOSED, GATE_OPENING, GATE_IS_OPEN, GATE_CLOSING };
+#include "common.h"
 
 typedef struct {
     int id, size, dir, prio;
@@ -69,7 +56,7 @@ int time_now(void);
 
 int level(int section);
 int is_last_section(const Ship *ship);
-void violation(const char *what);
+void violation(int code); // VIOLATION_*
 
 Ship *find_ship_to_enter(int chamber_id, int side, int room);
 Ship *find_ship_to_exit(int chamber_id);
