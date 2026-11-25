@@ -26,7 +26,12 @@ server_host=$ip
 make -s -C "$dir" || exit 1
 
 # из файла параметров нужны: камеры (1), суда (3), интервал прибытия (4), seed (10), тик (12)
-set -- $(cat "$params" 2> /dev/null)
+# «-» – параметры по умолчанию; cat - ждал бы ввода с клавиатуры, поэтому читаем только настоящий файл
+if [ "$params" != "-" ] && [ -f "$params" ]; then
+    set -- $(cat "$params")
+else
+    set --
+fi
 chambers=${1:-3}
 ships=${3:-10}
 interval=${4:-3}
