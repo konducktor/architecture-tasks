@@ -62,6 +62,9 @@ void model_close_log(void);
 
 void out(const char *format, ...) __attribute__((format(printf, 1, 2)));
 void event(const char *format, ...) __attribute__((format(printf, 1, 2))); // строка с временем [t=...]
+void event_received(const char *format, ...) __attribute__((format(printf, 1, 2))); // "<- от кого: что пришло"
+void event_sent(const char *format, ...) __attribute__((format(printf, 1, 2))); // "-> кому: что отправлено"
+void event_decision(const char *format, ...) __attribute__((format(printf, 1, 2))); // "диспетчер: собственное решение"
 int time_now(void);
 
 int level(int section);

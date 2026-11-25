@@ -1,14 +1,25 @@
-# Запуск всей модели на этой машине: ./run.sh [<файл_параметров>|-] [<лог>] [<порт>]
-# Сервер пишет полный журнал в терминал и в лог, клиенты – свои события в <лог>.clients.log.
+# Запуск всей модели на этой машине: ./run.sh <ip> <порт> [<файл_параметров>|-] [<лог>]
+# ip – адрес, на котором слушает сервер и к которому подключаются клиенты (0.0.0.0 – все интерфейсы).
+# Сервер пишет свой журнал в терминал и в лог, каждый клиент – свой журнал в папку <лог без .log>_clients/.
 # Суда запускаются по одному через случайные интервалы (seed из параметров), подключение судна = прибытие.
 # Ctrl+C получает только сервер: он останавливает модель, клиенты завершаются по его команде.
 # INFRA_DELAY=секунды – подключить камеры и ворота позже судов (проверка очереди до начала шлюзования).
+if [ $# -lt 2 ]; then
+    echo "Использование: $0 <ip> <порт> [<файл_параметров>|-] [<лог>]"
+    exit 1
+fi
+
 dir=$(cd "$(dirname "$0")" && pwd)
-params=${1:--}
-log=${2:-locks.log}
-port=${3:-${PORT:-6767}}
+ip=$1
+port=$2
+params=${3:--}
+log=${4:-locks.log}
 bin="$dir/bin"
-clients_log="${log%.log}.clients.log"
+clients_dir="${log%.log}_clients"
+
+# к 0.0.0.0 подключиться нельзя: это «все интерфейсы» для сервера, клиенты идут через loopback
+server_host=$ip
+[ "$ip" = "0.0.0.0" ] && server_host=127.0.0.1
 
 make -s -C "$dir" || exit 1
 
@@ -21,17 +32,18 @@ seed=${10:-1}
 tick=${12:-500}
 
 trap '' INT
-: > "$clients_log"
+mkdir -p "$clients_dir"
+rm -f "$clients_dir"/*.log 2> /dev/null
 
-"$bin/server" "$params" "$log" "$port" &
+"$bin/server" "$ip" "$port" "$params" "$log" &
 server=$!
 
 launch_infrastructure() {
     chamber_id=0
     while [ $chamber_id -lt "$chambers" ]; do
-        "$bin/chamber" 127.0.0.1 "$port" $chamber_id >> "$clients_log" 2>&1 &
-        "$bin/gate" 127.0.0.1 "$port" $chamber_id 0 >> "$clients_log" 2>&1 &
-        "$bin/gate" 127.0.0.1 "$port" $chamber_id 1 >> "$clients_log" 2>&1 &
+        "$bin/chamber" "$server_host" "$port" $chamber_id > "$clients_dir/chamber_$chamber_id.log" 2>&1 &
+        "$bin/gate" "$server_host" "$port" $chamber_id 0 > "$clients_dir/gate_${chamber_id}_upper.log" 2>&1 &
+        "$bin/gate" "$server_host" "$port" $chamber_id 1 > "$clients_dir/gate_${chamber_id}_lower.log" 2>&1 &
         chamber_id=$((chamber_id + 1))
     done
 }
@@ -48,7 +60,8 @@ launch_ships() {
         while read -r delay_ticks; do
             sleep "$(awk -v ticks="$delay_ticks" -v tick="$tick" 'BEGIN { print ticks * tick / 1000 }')"
             kill -0 "$server" 2> /dev/null || break
-            "$bin/ship" 127.0.0.1 "$port" --seed $((seed * 1000 + ship_number)) >> "$clients_log" 2>&1 &
+            "$bin/ship" "$server_host" "$port" --seed $((seed * 1000 + ship_number)) \
+                > "$clients_dir/ship_launch_$ship_number.log" 2>&1 &
             ship_number=$((ship_number + 1))
         done
     }

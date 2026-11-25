@@ -1,5 +1,5 @@
 #!/bin/sh
-# Все наборы данных и проверки отключений: ./run_tests.sh
+# Все наборы данных, проверки отключений и сетевых адресов: ./run_tests.sh
 # Логи сервера и клиентов сохраняются в tests/logs
 cd "$(dirname "$0")"
 run=../run.sh
@@ -28,14 +28,14 @@ verdict() {
 }
 
 start_in_background() {
-    $run "$1" "$logs/$2.log" "$port" > /dev/null &
+    $run 127.0.0.1 "$port" "$1" "$logs/$2.log" > /dev/null &
     job=$!
     sleep "$3"
 }
 
 for file in basic.txt by_direction.txt large.txt one_chamber.txt small_max_wait.txt timeout.txt; do
     name="${file%.txt}"
-    $run "$file" "$logs/$name.log" "$port" > /dev/null
+    $run 127.0.0.1 "$port" "$file" "$logs/$name.log" > /dev/null
 
     if [ "$name" = "timeout" ]; then expected="Время моделирования вышло"; else expected="Все .* судов прошли"; fi
     verdict "$name" "$expected"
@@ -43,7 +43,7 @@ done
 
 # камеры и ворота подключаются позже судов: суда ждут в очереди
 name="late_infrastructure"
-INFRA_DELAY=1 $run basic.txt "$logs/$name.log" "$port" > /dev/null
+INFRA_DELAY=1 $run 127.0.0.1 "$port" basic.txt "$logs/$name.log" > /dev/null
 verdict "$name" "Все .* судов прошли"
 
 # режим без ограничений: SIGUSR1 печатает состояние, SIGINT и SIGTERM останавливают
@@ -88,3 +88,37 @@ start_in_background unlimited.txt "$name" 2
 kill -9 "$(pgrep -f "$bin/chamber" | head -n 1)"
 wait $job
 verdict "$name" "Аварийная остановка"
+
+# сервер слушает все интерфейсы (0.0.0.0), клиенты подключаются через loopback
+name="all_interfaces"
+$run 0.0.0.0 "$port" basic.txt "$logs/$name.log" > /dev/null
+verdict "$name" "Все .* судов прошли"
+
+# сетевой адрес машины вместо loopback: так же клиенты подключаются с других компьютеров
+lan_ip=$(hostname -I 2> /dev/null | awk '{ print $1 }')
+[ -z "$lan_ip" ] && lan_ip=$(ipconfig getifaddr en0 2> /dev/null)
+name="lan_address"
+if [ -n "$lan_ip" ]; then
+    $run "$lan_ip" "$port" basic.txt "$logs/$name.log" > /dev/null
+    verdict "$name" "Все .* судов прошли"
+else
+    echo "SKIP $name: у машины нет сетевого адреса"
+fi
+
+# у каждого клиента свой журнал, и в нём только его собственные события
+name="separate_logs"
+clients_dir="$logs/basic_clients"
+if [ -s "$clients_dir/chamber_0.log" ] && [ -s "$clients_dir/gate_0_upper.log" ] && [ -s "$clients_dir/ship_launch_0.log" ] &&
+    ! grep -q "камера" "$clients_dir/gate_0_upper.log"; then
+    echo "OK   $name"
+else
+    echo "FAIL $name"
+fi
+
+# неверный адрес и адрес чужой машины: сервер сразу сообщает об ошибке
+name="bad_address"
+if ! $bin/server 300.1.1.1 "$port" 2> /dev/null && ! $bin/server 203.0.113.7 "$port" 2> /dev/null; then
+    echo "OK   $name"
+else
+    echo "FAIL $name"
+fi

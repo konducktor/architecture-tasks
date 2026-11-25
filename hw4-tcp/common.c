@@ -58,7 +58,15 @@ int parse_port(const char *text) {
     return parse_int(text, 1, 65535, "порт");
 }
 
-int create_server_socket(int port) {
+int create_server_socket(const char *ip, int port) {
+    struct sockaddr_in address = {0};
+    address.sin_family = AF_INET;
+    address.sin_port = htons((unsigned short)port);
+    if (inet_pton(AF_INET, ip, &address.sin_addr) != 1) {
+        fprintf(stderr, "Неверный IP-адрес «%s» (пример: 192.168.1.10 или 0.0.0.0 – все интерфейсы)\n", ip);
+        exit(1);
+    }
+
     int server_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (server_sock < 0) die("socket");
 
@@ -66,15 +74,10 @@ int create_server_socket(int port) {
     int reuse = 1;
     setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
 
-    struct sockaddr_in address = {0};
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_ANY);
-    address.sin_port = htons((unsigned short)port);
-
     if (bind(server_sock, (struct sockaddr *)&address, sizeof(address)) < 0) {
-        fprintf(stderr, "Не удалось занять порт %d: %s\n", port, strerror(errno));
-        if (errno == EADDRINUSE)
-            fprintf(stderr, "Порт занят другой программой. Укажите другой: server <файл_параметров> <лог> <порт>\n");
+        fprintf(stderr, "Не удалось занять адрес %s:%d: %s\n", ip, port, strerror(errno));
+        if (errno == EADDRINUSE) fprintf(stderr, "Порт занят другой программой, укажите другой\n");
+        if (errno == EADDRNOTAVAIL) fprintf(stderr, "У этой машины нет такого адреса, укажите свой IP или 0.0.0.0\n");
         exit(1);
     }
     if (listen(server_sock, SOMAXCONN) < 0) die("listen");

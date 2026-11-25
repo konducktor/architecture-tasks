@@ -5,8 +5,6 @@
 
 #include <stdint.h>
 
-#define DEFAULT_PORT 6767
-
 // роли клиентов в сообщении M_HELLO
 enum { ROLE_CHAMBER, ROLE_GATE, ROLE_SHIP };
 
@@ -73,7 +71,7 @@ int parse_int(const char *text, int min, int max, const char *what);
 int parse_port(const char *text);
 
 // сокеты
-int create_server_socket(int port);
+int create_server_socket(const char *ip, int port); // ip – адрес интерфейса, 0.0.0.0 – все интерфейсы
 int connect_to_server(const char *host, int port); // с повторными попытками, пока сервер не запустится
 
 // отправка целого сообщения; 0 при успехе, -1 если соединение разорвано

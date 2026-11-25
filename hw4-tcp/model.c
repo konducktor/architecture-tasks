@@ -40,6 +40,37 @@ void event(const char *format, ...) {
     out("[t=%4d] %s\n", time_now(), text);
 }
 
+static void event_with_prefix(const char *prefix, const char *format, va_list args) {
+    char text[512];
+
+    vsnprintf(text, sizeof(text), format, args);
+    event("%s%s", prefix, text);
+}
+
+void event_received(const char *format, ...) {
+    va_list args;
+
+    va_start(args, format);
+    event_with_prefix("<- ", format, args);
+    va_end(args);
+}
+
+void event_sent(const char *format, ...) {
+    va_list args;
+
+    va_start(args, format);
+    event_with_prefix("-> ", format, args);
+    va_end(args);
+}
+
+void event_decision(const char *format, ...) {
+    va_list args;
+
+    va_start(args, format);
+    event_with_prefix("диспетчер: ", format, args);
+    va_end(args);
+}
+
 int time_now(void) {
     return (int)((now_ms() - world.start_ms) / world.tick);
 }

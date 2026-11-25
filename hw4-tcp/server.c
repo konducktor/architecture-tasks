@@ -1,7 +1,8 @@
 // Сервер-диспетчер шлюзовой системы. Хранит состояние модели, выбирает группы
 // и пересылает сообщения между камерами, воротами и судами, проверяя инварианты.
 // Один процесс, все соединения обслуживаются через select().
-// Запуск: server [<файл_параметров>|-] [<лог>] [<порт>]
+// Сервер выводит только то, что сам получил (<-), отправил (->) или решил (диспетчер:).
+// Запуск: server <ip> <порт> [<файл_параметров>|-] [<лог>]
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -40,6 +41,7 @@ static void send_to(int sock, int type, int a, int b, int c) {
 }
 
 static void reject(int sock, int reason) {
+    event_sent("новый клиент: отказ (%s)", reject_reason(reason));
     send_to(sock, M_REJECT, reason, 0, 0);
     clients[sock].closing = 1;
 }
@@ -54,6 +56,10 @@ static void request_stop(int reason) {
 static void stop_on_failure(const char *note) {
     snprintf(world.failure_note, sizeof(world.failure_note), "%s", note);
     request_stop(FAILURE);
+}
+
+static const char *gate_role(const Chamber *chamber, int side) {
+    return side == chamber->entry_side ? "входа" : "выхода";
 }
 
 // диспетчер, назначение групп:
@@ -72,12 +78,12 @@ static void dispatch_groups(void) {
         world.groups++;
 
         if (side != chamber->last_dir) {
-            event("диспетчер: камера %d, направление работы -> %s", chamber_id, dir_name(side));
+            event_decision("камера %d, направление работы -> %s", chamber_id, dir_name(side));
             chamber->last_dir = side;
         }
 
-        event("диспетчер: камера %d пропускает группу (%s), в очереди с этой стороны: %d", chamber_id,
-              dir_name(side), queue_len(chamber_id, side));
+        event_sent("камера %d: пропустить группу (%s), в очереди с этой стороны: %d", chamber_id, dir_name(side),
+                   queue_len(chamber_id, side));
         send_to(chamber->chamber_client, M_START, side, chamber->water, 0);
     }
 }
@@ -93,7 +99,7 @@ static void put_in_queue(Ship *ship) {
     ship->queued_at = time_now();
     ship->chamber = ship->dir == DIR_FORWARD ? ship->pos : ship->pos - 1;
 
-    event("судно %d встало в очередь к камере %d", ship->id, ship->chamber);
+    event_sent("судно %d: в очереди к камере %d", ship->id, ship->chamber);
     send_to(ship->client, M_QUEUED, ship->chamber, ship->pos, 0);
 }
 
@@ -109,9 +115,14 @@ static void finish_entering(Ship *ship) {
     if (chamber->load > world.capacity) violation("вместимость камеры превышена");
 
     ship->state = SHIP_INSIDE;
-    event("судно %d (размер %d%s%s) вошло в камеру %d, занято %d/%d", ship->id, ship->size,
-          ship->prio ? ", приоритетное" : "", ship->client < 0 ? ", без связи" : "", ship->chamber, chamber->load,
-          world.capacity);
+    if (ship->client < 0)
+        event_decision("судно %d без связи, вход в камеру %d засчитан (занято %d/%d)", ship->id, ship->chamber,
+                       chamber->load, world.capacity);
+    else
+        event_received("судно %d: вошло в камеру %d (занято %d/%d)", ship->id, ship->chamber, chamber->load,
+                       world.capacity);
+
+    event_sent("камера %d: судно %d вошло", ship->chamber, ship->id);
     send_to(chamber->chamber_client, M_SHIP_DONE, ship->id, 0, 0);
 }
 
@@ -124,21 +135,26 @@ static void finish_exiting(Ship *ship) {
 
     chamber->load -= ship->size;
     ship->pos = ship->dir == DIR_FORWARD ? chamber_id + 1 : chamber_id;
-    event("судно %d вышло из камеры %d на участок %d (уровень %d)", ship->id, chamber_id, ship->pos, level(ship->pos));
 
     if (ship->client < 0) {
         ship->state = SHIP_LEFT;
         world.left++;
-        event("судно %d без связи выведено из камеры и покинуло систему", ship->id);
-    } else if (is_last_section(ship)) {
-        ship->state = SHIP_PASSED;
-        world.passed++;
-        event("судно %d прошло всю систему", ship->id);
-        send_to(ship->client, M_PASSED, ship->pos, 0, 0);
+        event_decision("судно %d без связи выведено из камеры %d на участок %d и покинуло систему", ship->id,
+                       chamber_id, ship->pos);
     } else {
-        put_in_queue(ship);
+        event_received("судно %d: вышло из камеры %d на участок %d", ship->id, chamber_id, ship->pos);
+
+        if (is_last_section(ship)) {
+            ship->state = SHIP_PASSED;
+            world.passed++;
+            event_sent("судно %d: прошло всю систему", ship->id);
+            send_to(ship->client, M_PASSED, ship->pos, 0, 0);
+        } else {
+            put_in_queue(ship);
+        }
     }
 
+    event_sent("камера %d: судно %d вышло", chamber_id, ship->id);
     send_to(chamber->chamber_client, M_SHIP_DONE, ship->id, 0, 0);
     dispatch_groups();
 }
@@ -150,7 +166,7 @@ static void handle_ship_arrived(Ship *ship, int sock, const Msg *msg) {
         (msg->c != 0 && msg->c != 1)) {
         ship->state = SHIP_LEFT;
         world.left++;
-        event("судно %d отклонено: неверные параметры", ship->id);
+        event_received("судно %d: прибыло с неверными параметрами", ship->id);
         reject(sock, REJECT_BAD_SHIP);
         return;
     }
@@ -158,8 +174,8 @@ static void handle_ship_arrived(Ship *ship, int sock, const Msg *msg) {
     ship->size = msg->a, ship->dir = msg->b, ship->prio = msg->c;
     ship->pos = ship->dir == DIR_FORWARD ? 0 : world.chambers_count;
 
-    event("судно %d (размер %d, %s%s) прибыло на участок %d", ship->id, ship->size, dir_name(ship->dir),
-          ship->prio ? ", приоритетное" : "", ship->pos);
+    event_received("судно %d: прибыло (размер %d, %s%s) на участок %d", ship->id, ship->size, dir_name(ship->dir),
+                   ship->prio ? ", приоритетное" : "", ship->pos);
     put_in_queue(ship);
     dispatch_groups();
 }
@@ -174,7 +190,7 @@ static void handle_ship_message(int sock, const Msg *msg) {
     } else if (msg->type == M_MOVED && msg->a == MOVE_EXIT && ship->state == SHIP_EXITING) {
         finish_exiting(ship);
     } else {
-        event("судно %d прислало неожиданное сообщение %d, соединение закрыто", ship->id, msg->type);
+        event_received("судно %d: неожиданное сообщение %d, соединение закрыто", ship->id, msg->type);
         clients[sock].closing = 1;
     }
 }
@@ -197,21 +213,23 @@ static void handle_level(int chamber_id, const Msg *msg) {
 
     if (msg->type == M_LEVEL_BEGIN) {
         chamber->level_changing = 1;
-        event("камера %d: %s", chamber_id,
-              to_side == chamber->entry_side ? "подготовка: уровень воды меняется под сторону входа"
-                                             : "подготовка к выходу: уровень воды меняется под сторону выхода");
+        event_received("камера %d: начинает менять уровень воды под сторону %s", chamber_id,
+                       to_side == chamber->entry_side ? "входа" : "выхода");
         return;
     }
 
     chamber->level_changing = 0;
     chamber->water = to_side;
     world.level_changes++;
-    event("камера %d: уровень воды изменён до %d", chamber_id, level(chamber_id + to_side));
+    event_received("камера %d: уровень воды изменён до %d", chamber_id, level(chamber_id + to_side));
 }
 
 static void handle_gate_command(int chamber_id, const Msg *msg) {
     Chamber *chamber = &world.chambers[chamber_id];
     int side = msg->a == SIDE_LOWER ? SIDE_LOWER : SIDE_UPPER;
+    const char *action = msg->b == GATE_OPEN ? "открыть" : "закрыть";
+
+    event_received("камера %d: %s ворота %s (%s)", chamber_id, action, gate_role(chamber, side), side_name(side));
 
     if (msg->b == GATE_OPEN) {
         if (chamber->gate[1 - side] != GATE_CLOSED || chamber->level_changing || chamber->water != side) {
@@ -224,6 +242,7 @@ static void handle_gate_command(int chamber_id, const Msg *msg) {
         chamber->gate[side] = GATE_CLOSING;
     }
 
+    event_sent("ворота %d (%s): %s", chamber_id, side_name(side), action);
     send_to(chamber->gate_client[side], M_GATE_CMD, side, msg->b, 0);
 }
 
@@ -233,6 +252,7 @@ static void call_next_ship(int chamber_id, int sock, int move) {
                                     : find_ship_to_exit(chamber_id);
 
     if (!ship) {
+        event_sent("камера %d: больше звать некого (%s)", chamber_id, move == MOVE_ENTER ? "вход" : "выход");
         send_to(sock, M_NO_SHIP, 0, 0, 0);
         return;
     }
@@ -246,8 +266,10 @@ static void call_next_ship(int chamber_id, int sock, int move) {
     if (move == MOVE_ENTER) {
         ship->state = SHIP_ENTERING;
         chamber->load += ship->size; // вместимость занимается сразу, до фактического входа
+        event_sent("судно %d: войти в камеру %d", ship->id, chamber_id);
     } else {
         ship->state = SHIP_EXITING;
+        event_sent("судно %d: выйти из камеры %d", ship->id, chamber_id);
     }
 
     send_to(ship->client, M_GO, chamber_id, move, 0);
@@ -270,11 +292,11 @@ static void handle_chamber_message(int sock, const Msg *msg) {
         break;
     case M_FREE:
         chamber->busy = 0;
-        event("камера %d: свободна", chamber_id);
+        event_received("камера %d: свободна", chamber_id);
         dispatch_groups();
         break;
     default:
-        event("камера %d прислала неожиданное сообщение %d", chamber_id, msg->type);
+        event_received("камера %d: неожиданное сообщение %d", chamber_id, msg->type);
         stop_on_failure("протокол камеры нарушен");
     }
 }
@@ -284,23 +306,24 @@ static void handle_chamber_message(int sock, const Msg *msg) {
 static void handle_gate_message(int sock, const Msg *msg) {
     int chamber_id = clients[sock].id, side = clients[sock].side;
     Chamber *chamber = &world.chambers[chamber_id];
-    const char *role = side == chamber->entry_side ? "входа" : "выхода";
 
     if (msg->type != M_GATE_DONE) {
-        event("ворота камеры %d прислали неожиданное сообщение %d", chamber_id, msg->type);
+        event_received("ворота %d (%s): неожиданное сообщение %d", chamber_id, side_name(side), msg->type);
         stop_on_failure("протокол ворот нарушен");
         return;
     }
 
+    const char *result = msg->b == GATE_OPEN ? "открыты" : "закрыты";
+    event_received("ворота %d (%s): %s", chamber_id, side_name(side), result);
+
     if (msg->b == GATE_OPEN) {
         chamber->gate[side] = GATE_IS_OPEN;
         if (chamber->gate[1 - side] != GATE_CLOSED) violation("противоположные ворота открыты одновременно");
-        event("камера %d: открыты ворота %s (%s)", chamber_id, role, side_name(side));
     } else {
         chamber->gate[side] = GATE_CLOSED;
-        event("камера %d: ворота %s (%s) закрыты", chamber_id, role, side_name(side));
     }
 
+    event_sent("камера %d: ворота %s (%s) %s", chamber_id, gate_role(chamber, side), side_name(side), result);
     send_to(chamber->chamber_client, M_GATE_DONE, side, msg->b, 0);
 }
 
@@ -315,11 +338,13 @@ static void start_locking_if_ready(void) {
     }
 
     world.locking_started = 1;
-    event("все камеры и ворота подключены, шлюзование начинается");
+    event_decision("все камеры и ворота подключены, шлюзование начинается");
     dispatch_groups();
 }
 
 static void register_chamber(int sock, int chamber_id) {
+    event_received("новый клиент: камера %d", chamber_id);
+
     if (chamber_id < 0 || chamber_id >= world.chambers_count) {
         reject(sock, REJECT_BAD_ID);
         return;
@@ -332,11 +357,12 @@ static void register_chamber(int sock, int chamber_id) {
     clients[sock].role = ROLE_CHAMBER, clients[sock].id = chamber_id;
     world.chambers[chamber_id].chamber_client = sock;
     send_to(sock, M_WELCOME, world.level_time, 0, world.tick);
-    event("камера %d подключилась", chamber_id);
     start_locking_if_ready();
 }
 
 static void register_gate(int sock, int chamber_id, int side) {
+    event_received("новый клиент: ворота %d (%s)", chamber_id, side == SIDE_LOWER ? "нижние" : "верхние");
+
     if (chamber_id < 0 || chamber_id >= world.chambers_count || (side != SIDE_UPPER && side != SIDE_LOWER)) {
         reject(sock, REJECT_BAD_ID);
         return;
@@ -349,11 +375,12 @@ static void register_gate(int sock, int chamber_id, int side) {
     clients[sock].role = ROLE_GATE, clients[sock].id = chamber_id, clients[sock].side = side;
     world.chambers[chamber_id].gate_client[side] = sock;
     send_to(sock, M_WELCOME, world.gate_time, 0, world.tick);
-    event("ворота камеры %d (%s) подключились", chamber_id, side_name(side));
     start_locking_if_ready();
 }
 
 static void register_ship(int sock) {
+    event_received("новый клиент: судно");
+
     int limit = world.ships_expected ? world.ships_expected : MAX_SHIPS;
     if (world.ships_registered >= limit) {
         reject(sock, REJECT_TOO_MANY_SHIPS);
@@ -369,6 +396,7 @@ static void register_ship(int sock) {
     ship->client = sock;
 
     clients[sock].role = ROLE_SHIP, clients[sock].id = ship->id;
+    event_sent("новое судно: выдан номер %d", ship->id);
     send_to(sock, M_WELCOME, ship->id, world.capacity, world.tick);
 }
 
@@ -396,26 +424,24 @@ static void handle_message(int sock, const Msg *msg) {
 // отключение участников:
 
 static void forget_ship(Ship *ship) {
+    if (ship->state == SHIP_PASSED || ship->state == SHIP_LEFT) return;
+
+    event_received("судно %d: соединение разорвано", ship->id);
+
     switch (ship->state) {
     case SHIP_CONNECTING:
-        ship->state = SHIP_LEFT;
-        world.left++;
-        event("судно %d отключилось, не сообщив о прибытии", ship->id);
-        break;
     case SHIP_QUEUED:
         ship->state = SHIP_LEFT;
         world.left++;
-        event("судно %d покинуло систему (отключилось) с участка %d", ship->id, ship->pos);
+        event_decision("судно %d покинуло систему с участка %d", ship->id, ship->pos);
         break;
     case SHIP_ENTERING:
-        event("судно %d потеряло связь при входе, вход завершается без связи", ship->id);
         finish_entering(ship);
         break;
     case SHIP_INSIDE:
-        event("судно %d потеряло связь, остаётся в камере %d до выгрузки", ship->id, ship->chamber);
+        event_decision("судно %d без связи остаётся в камере %d до выгрузки", ship->id, ship->chamber);
         break;
     case SHIP_EXITING:
-        event("судно %d потеряло связь при выходе, выход завершается без связи", ship->id);
         finish_exiting(ship);
         break;
     }
@@ -424,23 +450,24 @@ static void forget_ship(Ship *ship) {
 static void forget_infrastructure(int sock) {
     Client *client = &clients[sock];
     Chamber *chamber = &world.chambers[client->id];
-    char note[128];
+    char participant[64];
 
     if (client->role == ROLE_CHAMBER) {
         chamber->chamber_client = -1;
-        snprintf(note, sizeof(note), "отключилась камера %d", client->id);
+        snprintf(participant, sizeof(participant), "камера %d", client->id);
     } else {
         chamber->gate_client[client->side] = -1;
-        snprintf(note, sizeof(note), "отключились ворота камеры %d (%s)", client->id, side_name(client->side));
+        snprintf(participant, sizeof(participant), "ворота %d (%s)", client->id, side_name(client->side));
     }
+
+    event_received("%s: соединение разорвано", participant);
 
     // до начала шлюзования участник может просто переподключиться
-    if (!world.locking_started) {
-        event("%s до начала шлюзования", note);
-        return;
-    }
+    if (!world.locking_started) return;
 
-    event("%s, работа шлюза невозможна", note);
+    char note[128];
+    snprintf(note, sizeof(note), "отключился участник «%s»", participant);
+    event_decision("%s, работа шлюза невозможна", note);
     stop_on_failure(note);
 }
 
@@ -560,8 +587,8 @@ static void setup_signals(void) {
 static void toggle_time_limit(void) {
     world.end_at = world.end_at ? 0 : time_now() + (world.limit ? world.limit : 1000);
 
-    if (world.end_at) event("время моделирования ограничено, остановка при t=%d", world.end_at);
-    else event("время моделирования не ограничено");
+    if (world.end_at) event_decision("время моделирования ограничено, остановка при t=%d", world.end_at);
+    else event_decision("время моделирования не ограничено");
 }
 
 static void handle_signals(void) {
@@ -609,6 +636,8 @@ static void serve_one_round(void) {
 }
 
 static void shut_down(void) {
+    event_sent("все клиенты: модель остановлена (%s)", stop_reason(world.stop_reason));
+
     for (int sock = 0; sock <= highest_client_sock; sock++) {
         if (!clients[sock].in_use) continue;
         if (!clients[sock].closing) send_msg(sock, M_STOP, world.stop_reason, 0, 0, time_now());
@@ -621,15 +650,18 @@ static void shut_down(void) {
 }
 
 int main(int argc, char **argv) {
-    const char *params_path = argc > 1 ? argv[1] : "-";
-    const char *log_path = argc > 2 ? argv[2] : "locks.log";
-    int port = argc > 3 ? parse_port(argv[3]) : DEFAULT_PORT;
+    if (argc < 3) fail("Использование: server <ip> <порт> [<файл_параметров>|-] [<лог>] (ip 0.0.0.0 – все интерфейсы)");
 
-    // порт занимается первым: если он занят, лог прошлого запуска не затирается
-    listen_sock = create_server_socket(port);
+    const char *ip = argv[1];
+    int port = parse_port(argv[2]);
+    const char *params_path = argc > 3 ? argv[3] : "-";
+    const char *log_path = argc > 4 ? argv[4] : "locks.log";
+
+    // адрес занимается первым: если он занят, лог прошлого запуска не затирается
+    listen_sock = create_server_socket(ip, port);
     setup_signals();
     model_init(params_path, log_path);
-    out("Сервер слушает порт %d, ждёт %d камер и %d ворот\n", port, world.chambers_count, 2 * world.chambers_count);
+    out("Сервер слушает %s:%d, ждёт %d камер и %d ворот\n", ip, port, world.chambers_count, 2 * world.chambers_count);
 
     while (world.stop_reason == RUNNING) serve_one_round();
 
