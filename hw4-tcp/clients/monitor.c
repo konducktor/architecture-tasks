@@ -269,50 +269,50 @@ static void apply_ship_lost(ShipView *ship, int ship_id) {
 }
 
 static void apply_ship_event(const Msg *msg) {
-    ShipView *ship = ship_by_id(msg->a);
+    ShipView *ship = ship_by_id(msg->arg1);
     if (!ship) return;
 
     switch (msg->type) {
     case M_EV_SHIP_CONNECTED:
         ship->known = 1, ship->state = SHIP_CONNECTING;
-        show_event("к системе подключилось судно %d", msg->a);
+        show_event("к системе подключилось судно %d", msg->arg1);
         break;
     case M_EV_SHIP_PRIORITY:
         ship->prio = 1;
         break;
     case M_EV_SHIP_ARRIVED:
-        apply_ship_arrived(ship, msg->a, msg->b, msg->c);
+        apply_ship_arrived(ship, msg->arg1, msg->arg2, msg->arg3);
         break;
     case M_EV_SHIP_STATE:
-        ship->state = msg->b, ship->pos = msg->c;
+        ship->state = msg->arg2, ship->pos = msg->arg3;
         break;
     case M_EV_SHIP_QUEUED:
-        ship->state = SHIP_QUEUED, ship->pos = msg->c;
-        show_event("судно %d встало в очередь к камере %d", msg->a, msg->b);
+        ship->state = SHIP_QUEUED, ship->pos = msg->arg3;
+        show_event("судно %d встало в очередь к камере %d", msg->arg1, msg->arg2);
         break;
     case M_EV_SHIP_CALLED:
-        ship->state = msg->c == MOVE_ENTER ? SHIP_ENTERING : SHIP_EXITING;
-        show_event("диспетчер зовёт судно %d %s камеры %d", msg->a, msg->c == MOVE_ENTER ? "на вход в" : "на выход из",
-                   msg->b);
+        ship->state = msg->arg3 == MOVE_ENTER ? SHIP_ENTERING : SHIP_EXITING;
+        show_event("диспетчер зовёт судно %d %s камеры %d", msg->arg1, msg->arg3 == MOVE_ENTER ? "на вход в" : "на выход из",
+                   msg->arg2);
         break;
     case M_EV_SHIP_ENTERED:
-        apply_ship_entered(ship, msg->a, msg->b);
+        apply_ship_entered(ship, msg->arg1, msg->arg2);
         break;
     case M_EV_SHIP_EXITED:
         // судно уже вне камеры; следом придёт очередь к следующей камере, прохождение или уход
-        ship->state = SHIP_QUEUED, ship->pos = msg->c;
-        show_event("судно %d вышло из камеры %d на участок %d (уровень %d)", msg->a, msg->b, msg->c, level(msg->c));
+        ship->state = SHIP_QUEUED, ship->pos = msg->arg3;
+        show_event("судно %d вышло из камеры %d на участок %d (уровень %d)", msg->arg1, msg->arg2, msg->arg3, level(msg->arg3));
         break;
     case M_EV_SHIP_PASSED:
         ship->state = SHIP_PASSED;
         view.passed++;
-        show_event("судно %d прошло всю систему", msg->a);
+        show_event("судно %d прошло всю систему", msg->arg1);
         break;
     case M_EV_SHIP_LEFT:
-        apply_ship_left(ship, msg->a, msg->b);
+        apply_ship_left(ship, msg->arg1, msg->arg2);
         break;
     case M_EV_SHIP_LOST:
-        apply_ship_lost(ship, msg->a);
+        apply_ship_lost(ship, msg->arg1);
         break;
     }
 }
@@ -374,32 +374,32 @@ static void apply_participant_lost(int role, int chamber_id, int side) {
 }
 
 static void apply_chamber_event(const Msg *msg) {
-    if (!valid_chamber(msg->a)) return;
-    ChamberView *chamber = &view.chambers[msg->a];
-    int side = msg->b == SIDE_LOWER ? SIDE_LOWER : SIDE_UPPER;
+    if (!valid_chamber(msg->arg1)) return;
+    ChamberView *chamber = &view.chambers[msg->arg1];
+    int side = msg->arg2 == SIDE_LOWER ? SIDE_LOWER : SIDE_UPPER;
 
     switch (msg->type) {
     case M_EV_CHAMBER_CONNECTED:
         chamber->connected = 1;
-        show_event("камера %d подключилась", msg->a);
+        show_event("камера %d подключилась", msg->arg1);
         break;
     case M_EV_GATE_CONNECTED:
         chamber->gate_connected[side] = 1;
-        show_event("ворота камеры %d (%s) подключились", msg->a, side_name(side));
+        show_event("ворота камеры %d (%s) подключились", msg->arg1, side_name(side));
         break;
     case M_EV_GROUP_STARTED:
-        apply_group_started(chamber, msg->a, side);
+        apply_group_started(chamber, msg->arg1, side);
         break;
     case M_EV_LEVEL_BEGIN:
     case M_EV_LEVEL_END:
-        apply_level(chamber, msg->a, msg->type, side);
+        apply_level(chamber, msg->arg1, msg->type, side);
         break;
     case M_EV_GATE_STATE:
-        apply_gate_state(chamber, msg->a, side, msg->c);
+        apply_gate_state(chamber, msg->arg1, side, msg->arg3);
         break;
     case M_EV_CHAMBER_FREE:
         chamber->busy = 0;
-        show_event("камера %d: свободна", msg->a);
+        show_event("камера %d: свободна", msg->arg1);
         break;
     }
 }
@@ -421,15 +421,15 @@ static void apply_info(int key, int value) {
 static void apply_system_event(const Msg *msg) {
     switch (msg->type) {
     case M_INFO:
-        apply_info(msg->a, msg->b);
+        apply_info(msg->arg1, msg->arg2);
         break;
     case M_SNAPSHOT_BEGIN:
         print_header();
         view.in_snapshot = 1;
         break;
     case M_COUNTS:
-        view.passed = msg->a, view.left = msg->b;
-        if (msg->c > view.ships_seen) view.ships_seen = msg->c;
+        view.passed = msg->arg1, view.left = msg->arg2;
+        if (msg->arg3 > view.ships_seen) view.ships_seen = msg->arg3;
         break;
     case M_SNAPSHOT_END:
         view.in_snapshot = 0;
@@ -440,28 +440,28 @@ static void apply_system_event(const Msg *msg) {
         show_event("все камеры и ворота подключены, шлюзование начинается");
         break;
     case M_EV_CLIENT_REJECTED:
-        show_event("сервер отказал новому клиенту: %s", reject_reason(msg->a));
+        show_event("сервер отказал новому клиенту: %s", reject_reason(msg->arg1));
         break;
     case M_EV_PARTICIPANT_LOST:
-        if (valid_chamber(msg->b)) apply_participant_lost(msg->a, msg->b, msg->c == SIDE_LOWER);
+        if (valid_chamber(msg->arg2)) apply_participant_lost(msg->arg1, msg->arg2, msg->arg3 == SIDE_LOWER);
         break;
     case M_EV_VIOLATION:
         snprintf(view.failure_note, sizeof(view.failure_note), "нарушение инварианта");
-        show_event("НАРУШЕНИЕ ИНВАРИАНТА: %s", violation_text(msg->a));
+        show_event("НАРУШЕНИЕ ИНВАРИАНТА: %s", violation_text(msg->arg1));
         break;
     case M_EV_TIME_LIMIT:
-        view.time_limit = msg->a;
-        if (msg->a) show_event("время моделирования ограничено, остановка при t=%d", msg->a);
+        view.time_limit = msg->arg1;
+        if (msg->arg1) show_event("время моделирования ограничено, остановка при t=%d", msg->arg1);
         else show_event("время моделирования не ограничено");
         break;
     case M_EV_FINAL_COUNTS:
-        view.final.passed = msg->a, view.final.left = msg->b, view.final.groups = msg->c;
+        view.final.passed = msg->arg1, view.final.left = msg->arg2, view.final.groups = msg->arg3;
         break;
     case M_EV_FINAL_TIMES:
-        view.final.end_time = msg->a, view.final.average_wait = msg->b, view.final.max_wait = msg->c;
+        view.final.end_time = msg->arg1, view.final.average_wait = msg->arg2, view.final.max_wait = msg->arg3;
         break;
     case M_EV_FINAL_OTHER:
-        view.final.level_changes = msg->a, view.final.violations = msg->b, view.final.stop_signal = msg->c;
+        view.final.level_changes = msg->arg1, view.final.violations = msg->arg2, view.final.stop_signal = msg->arg3;
         break;
     default:
         show_event("неизвестное сообщение от сервера: %d", msg->type);

@@ -29,7 +29,7 @@ static int move_ships(int move) {
         if (reply.type == M_NO_SHIP) return moved;
         if (reply.type != M_SHIP_DONE) fail("Камера: неожиданное сообщение при загрузке или выгрузке");
 
-        client_say("судно %d %s", reply.a, move == MOVE_ENTER ? "вошло" : "вышло");
+        client_say("судно %d %s", reply.arg1, move == MOVE_ENTER ? "вошло" : "вышло");
         moved++;
     }
 }
@@ -63,11 +63,11 @@ int main(int argc, char **argv) {
     int chamber_id = parse_int(argv[3], 0, 1000, "номер камеры");
 
     client_set_name("камера %d", chamber_id);
-    level_time = client_join(argv[1], port, ROLE_CHAMBER, chamber_id, 0).a;
+    level_time = client_join(argv[1], port, ROLE_CHAMBER, chamber_id, 0).arg1;
     client_say("подключена к серверу");
 
     while (1) {
         Msg start = client_expect(M_START);
-        pass_group(start.a, start.b);
+        pass_group(start.arg1, start.arg2);
     }
 }

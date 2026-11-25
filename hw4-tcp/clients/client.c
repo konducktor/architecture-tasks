@@ -47,28 +47,28 @@ void client_say(const char *format, ...) {
     fflush(stdout);
 }
 
-Msg client_join(const char *host, int port, int role, int b, int c) {
+Msg client_join(const char *host, int port, int role, int arg2, int arg3) {
     Msg reply;
 
     signal(SIGPIPE, SIG_IGN);
     server_sock = connect_to_server(host, port);
 
-    if (send_msg(server_sock, M_HELLO, role, b, c, 0) < 0 || recv_msg(server_sock, &reply) < 0)
+    if (send_msg(server_sock, M_HELLO, role, arg2, arg3, 0) < 0 || recv_msg(server_sock, &reply) < 0)
         fail("Сервер закрыл соединение при подключении");
 
     if (reply.type == M_REJECT) {
-        fprintf(stderr, "%s: сервер отказал в подключении: %s\n", client_name, reject_reason(reply.a));
+        fprintf(stderr, "%s: сервер отказал в подключении: %s\n", client_name, reject_reason(reply.arg1));
         exit(1);
     }
     if (reply.type != M_WELCOME) fail("Неожиданный ответ сервера при подключении");
 
-    tick_ms = reply.c > 0 ? reply.c : 1;
+    tick_ms = reply.arg3 > 0 ? reply.arg3 : 1;
     sync_time(reply.time);
     return reply;
 }
 
-void client_send(int type, int a, int b, int c) {
-    if (send_msg(server_sock, type, a, b, c, client_time_now()) < 0) {
+void client_send(int type, int arg1, int arg2, int arg3) {
+    if (send_msg(server_sock, type, arg1, arg2, arg3, client_time_now()) < 0) {
         client_say("соединение с сервером потеряно");
         exit(1);
     }
@@ -85,8 +85,8 @@ Msg client_receive(void) {
     sync_time(msg.time);
 
     if (msg.type == M_STOP) {
-        if (stop_handler) stop_handler(msg.a);
-        else client_say("модель остановлена: %s", stop_reason(msg.a));
+        if (stop_handler) stop_handler(msg.arg1);
+        else client_say("модель остановлена: %s", stop_reason(msg.arg1));
         close(server_sock);
         exit(0);
     }

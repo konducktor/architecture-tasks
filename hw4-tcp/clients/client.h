@@ -6,10 +6,10 @@
 #include "../common.h"
 
 // подключиться и представиться; при отказе сервера программа завершается
-Msg client_join(const char *host, int port, int role, int b, int c);
+Msg client_join(const char *host, int port, int role, int arg2, int arg3);
 
 void client_set_name(const char *format, ...) __attribute__((format(printf, 1, 2)));
-void client_send(int type, int a, int b, int c);
+void client_send(int type, int arg1, int arg2, int arg3);
 
 // ждать сообщение нужного типа; M_STOP и разрыв соединения завершают программу
 Msg client_expect(int type);

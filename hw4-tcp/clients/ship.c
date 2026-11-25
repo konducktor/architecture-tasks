@@ -74,7 +74,7 @@ int main(int argc, char **argv) {
     ShipOptions options = parse_options(argc, argv);
 
     Msg welcome = client_join(argv[1], port, ROLE_SHIP, 0, 0);
-    int ship_id = welcome.a, capacity = welcome.b;
+    int ship_id = welcome.arg1, capacity = welcome.arg2;
     client_set_name("судно %d", ship_id);
 
     fill_random_options(&options, capacity);
@@ -91,16 +91,16 @@ int main(int argc, char **argv) {
 
         switch (msg.type) {
         case M_QUEUED:
-            client_say("встало в очередь к камере %d (участок %d)", msg.a, msg.b);
+            client_say("встало в очередь к камере %d (участок %d)", msg.arg1, msg.arg2);
             break;
         case M_GO:
-            move_through_chamber(msg.a, msg.b);
+            move_through_chamber(msg.arg1, msg.arg2);
             break;
         case M_PASSED:
-            client_say("прошло всю систему, участок %d", msg.a);
+            client_say("прошло всю систему, участок %d", msg.arg1);
             return 0;
         case M_REJECT:
-            client_say("сервер отказал: %s", reject_reason(msg.a));
+            client_say("сервер отказал: %s", reject_reason(msg.arg1));
             return 1;
         default:
             fprintf(stderr, "судно %d: неожиданное сообщение %d\n", ship_id, msg.type);

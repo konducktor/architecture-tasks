@@ -122,8 +122,8 @@ int connect_to_server(const char *host, int port) {
     exit(1);
 }
 
-int send_msg(int sock, int type, int a, int b, int c, int time) {
-    int32_t wire[5] = {htonl(type), htonl(a), htonl(b), htonl(c), htonl(time)};
+int send_msg(int sock, int type, int arg1, int arg2, int arg3, int time) {
+    int32_t wire[5] = {htonl(type), htonl(arg1), htonl(arg2), htonl(arg3), htonl(time)};
     const char *cursor = (const char *)wire;
     size_t left = WIRE_MSG_SIZE;
 
@@ -144,9 +144,9 @@ void decode_msg(const unsigned char *wire, Msg *msg) {
 
     memcpy(fields, wire, WIRE_MSG_SIZE);
     msg->type = (int32_t)ntohl(fields[0]);
-    msg->a = (int32_t)ntohl(fields[1]);
-    msg->b = (int32_t)ntohl(fields[2]);
-    msg->c = (int32_t)ntohl(fields[3]);
+    msg->arg1 = (int32_t)ntohl(fields[1]);
+    msg->arg2 = (int32_t)ntohl(fields[2]);
+    msg->arg3 = (int32_t)ntohl(fields[3]);
     msg->time = (int32_t)ntohl(fields[4]);
 }
 

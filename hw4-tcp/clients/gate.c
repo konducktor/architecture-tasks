@@ -12,11 +12,11 @@ int main(int argc, char **argv) {
 
     client_set_name("ворота %d (%s)", chamber_id, side_name(side));
     Msg welcome = client_join(argv[1], port, ROLE_GATE, chamber_id, side);
-    int gate_time = welcome.a;
+    int gate_time = welcome.arg1;
     client_say("подключены к серверу");
 
     while (1) {
-        int command = client_expect(M_GATE_CMD).b;
+        int command = client_expect(M_GATE_CMD).arg2;
 
         client_say(command == GATE_OPEN ? "открываются" : "закрываются");
         client_sleep_ticks(gate_time);

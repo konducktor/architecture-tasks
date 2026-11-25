@@ -36,15 +36,15 @@ static volatile sig_atomic_t stop_signal, want_dump, want_toggle;
 
 // отправка:
 
-static void send_to(int sock, int type, int a, int b, int c) {
+static void send_to(int sock, int type, int arg1, int arg2, int arg3) {
     if (sock < 0 || !clients[sock].in_use || clients[sock].closing) return;
-    if (send_msg(sock, type, a, b, c, time_now()) < 0) clients[sock].closing = 1;
+    if (send_msg(sock, type, arg1, arg2, arg3, time_now()) < 0) clients[sock].closing = 1;
 }
 
 // мониторы получают копию каждого изменения модели; в журнал сервера эти рассылки не пишутся
-static void notify_monitors(int type, int a, int b, int c) {
+static void notify_monitors(int type, int arg1, int arg2, int arg3) {
     for (int sock = 0; sock <= highest_client_sock; sock++)
-        if (clients[sock].in_use && clients[sock].role == ROLE_MONITOR) send_to(sock, type, a, b, c);
+        if (clients[sock].in_use && clients[sock].role == ROLE_MONITOR) send_to(sock, type, arg1, arg2, arg3);
 }
 
 static void report_violation(int code) {
@@ -181,8 +181,8 @@ static void finish_exiting(Ship *ship) {
 static void handle_ship_arrived(Ship *ship, int sock, const Msg *msg) {
     if (ship->state != SHIP_CONNECTING) return;
 
-    if (msg->a < 1 || msg->a > world.capacity || (msg->b != DIR_FORWARD && msg->b != DIR_BACKWARD) ||
-        (msg->c != 0 && msg->c != 1)) {
+    if (msg->arg1 < 1 || msg->arg1 > world.capacity || (msg->arg2 != DIR_FORWARD && msg->arg2 != DIR_BACKWARD) ||
+        (msg->arg3 != 0 && msg->arg3 != 1)) {
         ship->state = SHIP_LEFT;
         world.left++;
         event_received("судно %d: прибыло с неверными параметрами", ship->id);
@@ -191,7 +191,7 @@ static void handle_ship_arrived(Ship *ship, int sock, const Msg *msg) {
         return;
     }
 
-    ship->size = msg->a, ship->dir = msg->b, ship->prio = msg->c;
+    ship->size = msg->arg1, ship->dir = msg->arg2, ship->prio = msg->arg3;
     ship->pos = ship->dir == DIR_FORWARD ? 0 : world.chambers_count;
 
     event_received("судно %d: прибыло (размер %d, %s%s) на участок %d", ship->id, ship->size, dir_name(ship->dir),
@@ -207,9 +207,9 @@ static void handle_ship_message(int sock, const Msg *msg) {
 
     if (msg->type == M_ARRIVED) {
         handle_ship_arrived(ship, sock, msg);
-    } else if (msg->type == M_MOVED && msg->a == MOVE_ENTER && ship->state == SHIP_ENTERING) {
+    } else if (msg->type == M_MOVED && msg->arg1 == MOVE_ENTER && ship->state == SHIP_ENTERING) {
         finish_entering(ship);
-    } else if (msg->type == M_MOVED && msg->a == MOVE_EXIT && ship->state == SHIP_EXITING) {
+    } else if (msg->type == M_MOVED && msg->arg1 == MOVE_EXIT && ship->state == SHIP_EXITING) {
         finish_exiting(ship);
     } else {
         event_received("судно %d: неожиданное сообщение %d, соединение закрыто", ship->id, msg->type);
@@ -225,7 +225,7 @@ static int gates_closed(const Chamber *chamber) {
 
 static void handle_level(int chamber_id, const Msg *msg) {
     Chamber *chamber = &world.chambers[chamber_id];
-    int to_side = msg->a == SIDE_LOWER ? SIDE_LOWER : SIDE_UPPER;
+    int to_side = msg->arg1 == SIDE_LOWER ? SIDE_LOWER : SIDE_UPPER;
 
     if (!gates_closed(chamber)) {
         report_violation(VIOLATION_LEVEL_WITH_OPEN_GATES);
@@ -250,12 +250,12 @@ static void handle_level(int chamber_id, const Msg *msg) {
 
 static void handle_gate_command(int chamber_id, const Msg *msg) {
     Chamber *chamber = &world.chambers[chamber_id];
-    int side = msg->a == SIDE_LOWER ? SIDE_LOWER : SIDE_UPPER;
-    const char *action = msg->b == GATE_OPEN ? "открыть" : "закрыть";
+    int side = msg->arg1 == SIDE_LOWER ? SIDE_LOWER : SIDE_UPPER;
+    const char *action = msg->arg2 == GATE_OPEN ? "открыть" : "закрыть";
 
     event_received("камера %d: %s ворота %s (%s)", chamber_id, action, gate_role(chamber, side), side_name(side));
 
-    if (msg->b == GATE_OPEN) {
+    if (msg->arg2 == GATE_OPEN) {
         if (chamber->gate[1 - side] != GATE_CLOSED || chamber->level_changing || chamber->water != side) {
             report_violation(VIOLATION_GATE_OPEN_UNSAFE);
             stop_on_failure("камера пыталась открыть ворота с нарушением инварианта");
@@ -268,7 +268,7 @@ static void handle_gate_command(int chamber_id, const Msg *msg) {
 
     notify_monitors(M_EV_GATE_STATE, chamber_id, side, chamber->gate[side]);
     event_sent("ворота %d (%s): %s", chamber_id, side_name(side), action);
-    send_to(chamber->gate_client[side], M_GATE_CMD, side, msg->b, 0);
+    send_to(chamber->gate_client[side], M_GATE_CMD, side, msg->arg2, 0);
 }
 
 static void call_next_ship(int chamber_id, int sock, int move) {
@@ -314,7 +314,7 @@ static void handle_chamber_message(int sock, const Msg *msg) {
         handle_gate_command(chamber_id, msg);
         break;
     case M_NEXT_SHIP:
-        call_next_ship(chamber_id, sock, msg->a);
+        call_next_ship(chamber_id, sock, msg->arg1);
         break;
     case M_FREE:
         chamber->busy = 0;
@@ -340,10 +340,10 @@ static void handle_gate_message(int sock, const Msg *msg) {
         return;
     }
 
-    const char *result = msg->b == GATE_OPEN ? "открыты" : "закрыты";
+    const char *result = msg->arg2 == GATE_OPEN ? "открыты" : "закрыты";
     event_received("ворота %d (%s): %s", chamber_id, side_name(side), result);
 
-    if (msg->b == GATE_OPEN) {
+    if (msg->arg2 == GATE_OPEN) {
         chamber->gate[side] = GATE_IS_OPEN;
         if (chamber->gate[1 - side] != GATE_CLOSED) report_violation(VIOLATION_OPPOSITE_GATES_OPEN);
     } else {
@@ -352,7 +352,7 @@ static void handle_gate_message(int sock, const Msg *msg) {
 
     notify_monitors(M_EV_GATE_STATE, chamber_id, side, chamber->gate[side]);
     event_sent("камера %d: ворота %s (%s) %s", chamber_id, gate_role(chamber, side), side_name(side), result);
-    send_to(chamber->chamber_client, M_GATE_DONE, side, msg->b, 0);
+    send_to(chamber->chamber_client, M_GATE_DONE, side, msg->arg2, 0);
 }
 
 // подключение участников:
@@ -492,10 +492,10 @@ static void handle_hello(int sock, const Msg *msg) {
         return;
     }
 
-    if (msg->a == ROLE_CHAMBER) register_chamber(sock, msg->b);
-    else if (msg->a == ROLE_GATE) register_gate(sock, msg->b, msg->c);
-    else if (msg->a == ROLE_SHIP) register_ship(sock);
-    else if (msg->a == ROLE_MONITOR) register_monitor(sock);
+    if (msg->arg1 == ROLE_CHAMBER) register_chamber(sock, msg->arg2);
+    else if (msg->arg1 == ROLE_GATE) register_gate(sock, msg->arg2, msg->arg3);
+    else if (msg->arg1 == ROLE_SHIP) register_ship(sock);
+    else if (msg->arg1 == ROLE_MONITOR) register_monitor(sock);
     else clients[sock].closing = 1;
 }
 
